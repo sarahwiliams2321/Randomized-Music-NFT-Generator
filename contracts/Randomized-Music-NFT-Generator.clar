@@ -167,3 +167,114 @@
 (define-read-only (get-last-token-id)
   (- (var-get next-token-id) u1)
 )
+
+
+(define-map rarity-scores uint uint)
+(define-map genre-rarity (string-ascii 32) uint)
+(define-map key-rarity (string-ascii 8) uint)
+
+(define-constant RARITY-GENRE-WEIGHTS (list 
+  { genre: "Electronic", weight: u10 }
+  { genre: "Rock", weight: u15 }
+  { genre: "Jazz", weight: u25 }
+  { genre: "Classical", weight: u30 }
+  { genre: "Ambient", weight: u35 }
+  { genre: "Hip-Hop", weight: u20 }
+  { genre: "Techno", weight: u12 }
+  { genre: "House", weight: u18 }
+))
+
+(define-constant RARITY-KEY-WEIGHTS (list
+  { key: "C", weight: u5 } { key: "C#", weight: u15 }
+  { key: "D", weight: u8 } { key: "D#", weight: u20 }
+  { key: "E", weight: u10 } { key: "F", weight: u12 }
+  { key: "F#", weight: u25 } { key: "G", weight: u7 }
+  { key: "G#", weight: u18 } { key: "A", weight: u6 }
+  { key: "A#", weight: u22 } { key: "B", weight: u16 }
+))
+
+(define-private (get-genre-rarity-weight (target-genre (string-ascii 32)))
+  (if (is-eq target-genre "Electronic") u10
+    (if (is-eq target-genre "Rock") u15
+      (if (is-eq target-genre "Jazz") u25
+        (if (is-eq target-genre "Classical") u30
+          (if (is-eq target-genre "Ambient") u35
+            (if (is-eq target-genre "Hip-Hop") u20
+              (if (is-eq target-genre "Techno") u12
+                (if (is-eq target-genre "House") u18 u10)
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+(define-private (get-key-rarity-weight (target-key (string-ascii 8)))
+  (if (is-eq target-key "C") u5
+    (if (is-eq target-key "C#") u15
+      (if (is-eq target-key "D") u8
+        (if (is-eq target-key "D#") u20
+          (if (is-eq target-key "E") u10
+            (if (is-eq target-key "F") u12
+              (if (is-eq target-key "F#") u25
+                (if (is-eq target-key "G") u7
+                  (if (is-eq target-key "G#") u18
+                    (if (is-eq target-key "A") u6
+                      (if (is-eq target-key "A#") u22
+                        (if (is-eq target-key "B") u16 u5)
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+(define-private (calculate-tempo-rarity (tempo uint))
+  (if (or (< tempo u80) (> tempo u180)) u30 u10)
+)
+
+(define-private (calculate-duration-rarity (duration uint))
+  (if (or (< duration u180) (> duration u360)) u25 u8)
+)
+
+(define-private (calculate-rarity-score (token-id uint))
+  (let ((metadata (unwrap-panic (get-track-metadata token-id))))
+    (+ 
+      (get-genre-rarity-weight (get genre metadata))
+      (get-key-rarity-weight (get key metadata))
+      (calculate-tempo-rarity (get tempo metadata))
+      (calculate-duration-rarity (get duration metadata))
+    )
+  )
+)
+
+(define-public (compute-track-rarity (token-id uint))
+  (let ((score (calculate-rarity-score token-id)))
+    (map-set rarity-scores token-id score)
+    (ok score)
+  )
+)
+
+(define-read-only (get-rarity-score (token-id uint))
+  (map-get? rarity-scores token-id)
+)
+
+(define-read-only (get-rarity-tier (token-id uint))
+  (let ((score (default-to u0 (get-rarity-score token-id))))
+    (if (>= score u80) "Legendary"
+      (if (>= score u60) "Epic"
+        (if (>= score u40) "Rare"
+          "Common"
+        )
+      )
+    )
+  )
+)
