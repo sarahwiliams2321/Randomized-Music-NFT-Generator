@@ -278,3 +278,72 @@
     )
   )
 )
+
+(define-map listings uint {
+  seller: principal,
+  price: uint,
+  active: bool
+})
+
+(define-map original-minters uint principal)
+(define-map royalty-earnings principal uint)
+
+(define-constant ERR-NOT-OWNER (err u403))
+(define-constant ERR-LISTING-NOT-FOUND (err u405))
+(define-constant ERR-INSUFFICIENT-PAYMENT (err u406))
+(define-constant ROYALTY-PERCENTAGE u5)
+
+(define-public (list-track (token-id uint) (price uint))
+  (let ((owner (unwrap! (nft-get-owner? music-track token-id) ERR-NOT-FOUND)))
+    (asserts! (is-eq tx-sender owner) ERR-NOT-OWNER)
+    (map-set listings token-id {
+      seller: owner,
+      price: price,
+      active: true
+    })
+    (ok true)
+  )
+)
+
+(define-public (delist-track (token-id uint))
+  (let ((listing (unwrap! (map-get? listings token-id) ERR-LISTING-NOT-FOUND)))
+    (asserts! (is-eq tx-sender (get seller listing)) ERR-NOT-OWNER)
+    (map-set listings token-id (merge listing { active: false }))
+    (ok true)
+  )
+)
+
+(define-public (purchase-track (token-id uint))
+  (let (
+    (listing (unwrap! (map-get? listings token-id) ERR-LISTING-NOT-FOUND))
+    (seller (get seller listing))
+    (price (get price listing))
+    (royalty-amount (/ (* price ROYALTY-PERCENTAGE) u100))
+    (original-minter (default-to seller (map-get? original-minters token-id)))
+  )
+    (asserts! (get active listing) ERR-LISTING-NOT-FOUND)
+    (try! (stx-transfer? price tx-sender seller))
+    (try! (nft-transfer? music-track token-id seller tx-sender))
+    (if (not (is-eq seller original-minter))
+      (begin
+        (try! (stx-transfer? royalty-amount seller original-minter))
+        (map-set royalty-earnings original-minter 
+          (+ (default-to u0 (map-get? royalty-earnings original-minter)) royalty-amount))
+        true
+      )
+      true
+    )
+    (map-set owner-track-count seller (- (get-track-count seller) u1))
+    (map-set owner-track-count tx-sender (+ (get-track-count tx-sender) u1))
+    (map-set listings token-id (merge listing { active: false }))
+    (ok true)
+  )
+)
+
+(define-read-only (get-listing (token-id uint))
+  (map-get? listings token-id)
+)
+
+(define-read-only (get-royalty-earnings (creator principal))
+  (default-to u0 (map-get? royalty-earnings creator))
+)
