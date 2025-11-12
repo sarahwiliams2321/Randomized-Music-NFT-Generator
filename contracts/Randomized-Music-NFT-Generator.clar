@@ -347,3 +347,79 @@
 (define-read-only (get-royalty-earnings (creator principal))
   (default-to u0 (map-get? royalty-earnings creator))
 )
+
+
+(define-map collaboration-enabled uint bool)
+(define-map collaboration-proposals 
+  { requester-track: uint, target-track: uint } 
+  { requester: principal, status: (string-ascii 16) }
+)
+(define-map collaboration-partners uint (list 10 uint))
+
+(define-constant ERR-COLLABORATION-DISABLED (err u407))
+(define-constant ERR-SAME-TRACK (err u408))
+(define-constant ERR-PROPOSAL-EXISTS (err u410))
+
+(define-public (enable-collaboration (token-id uint))
+  (let ((owner (unwrap! (nft-get-owner? music-track token-id) ERR-NOT-FOUND)))
+    (asserts! (is-eq tx-sender owner) ERR-NOT-OWNER)
+    (map-set collaboration-enabled token-id true)
+    (ok true)
+  )
+)
+
+(define-public (disable-collaboration (token-id uint))
+  (let ((owner (unwrap! (nft-get-owner? music-track token-id) ERR-NOT-FOUND)))
+    (asserts! (is-eq tx-sender owner) ERR-NOT-OWNER)
+    (map-set collaboration-enabled token-id false)
+    (ok true)
+  )
+)
+
+(define-public (propose-collaboration (requester-track-id uint) (target-track-id uint))
+  (let (
+    (requester-owner (unwrap! (nft-get-owner? music-track requester-track-id) ERR-NOT-FOUND))
+    (target-enabled (default-to false (map-get? collaboration-enabled target-track-id)))
+  )
+    (asserts! (is-eq tx-sender requester-owner) ERR-NOT-OWNER)
+    (asserts! (not (is-eq requester-track-id target-track-id)) ERR-SAME-TRACK)
+    (asserts! target-enabled ERR-COLLABORATION-DISABLED)
+    (asserts! (is-none (map-get? collaboration-proposals 
+      { requester-track: requester-track-id, target-track: target-track-id })) 
+      ERR-PROPOSAL-EXISTS)
+    (map-set collaboration-proposals 
+      { requester-track: requester-track-id, target-track: target-track-id }
+      { requester: tx-sender, status: "pending" })
+    (ok true)
+  )
+)
+
+(define-public (accept-collaboration (requester-track-id uint) (target-track-id uint))
+  (let (
+    (target-owner (unwrap! (nft-get-owner? music-track target-track-id) ERR-NOT-FOUND))
+    (proposal (unwrap! (map-get? collaboration-proposals 
+      { requester-track: requester-track-id, target-track: target-track-id }) 
+      ERR-NOT-FOUND))
+    (current-partners (default-to (list) (map-get? collaboration-partners target-track-id)))
+  )
+    (asserts! (is-eq tx-sender target-owner) ERR-NOT-OWNER)
+    (map-set collaboration-proposals 
+      { requester-track: requester-track-id, target-track: target-track-id }
+      (merge proposal { status: "accepted" }))
+    (map-set collaboration-partners target-track-id 
+      (unwrap-panic (as-max-len? (append current-partners requester-track-id) u10)))
+    (ok true)
+  )
+)
+
+(define-read-only (is-collaboration-enabled (token-id uint))
+  (default-to false (map-get? collaboration-enabled token-id))
+)
+
+(define-read-only (get-collaboration-proposal (requester-track uint) (target-track uint))
+  (map-get? collaboration-proposals { requester-track: requester-track, target-track: target-track })
+)
+
+(define-read-only (get-collaboration-partners (token-id uint))
+  (map-get? collaboration-partners token-id)
+)
